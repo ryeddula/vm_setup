@@ -10,7 +10,6 @@
 use strict;
 use warnings;
 
-use Data::Dumper;
 use Getopt::Long;
 use Fcntl;
 $| = 1;
@@ -288,9 +287,8 @@ Description: Performs a number of functions to prepare meteorologist VMs for imm
 Options:
 
     --force: Ignores previous run check
-    --fast: Skips all optional setup functions
-    --full: Passes yes to all optional setup functions
-    --installcl: Installs CloudLinux(can take awhile and requires reboot)
+    --full: Runs all optional steps.
+    --installcl: Installs CloudLinux (requires reboot)
 
 Full list of things this does:
 
@@ -307,10 +305,9 @@ Full list of things this does:
     - Disables cphulkd
     - Creates access hash
     - Updates motd
-    - Runs upcp (optional)
-    - Runs check_cpanel_rpms --fix (optional)
-    - Downloads and runs cldeploy (Installs CloudLinux) --installcl (optional)
-    - Installs Task::Cpanel::Core (optional)
+    - Runs upcp (optional, toggle with '--upcp'/'--noupcp')
+    - Runs check_cpanel_rpms --fix (optional, toggle with '--check_rpms'/'--nocheck_rpms')
+    - Installs Task::Cpanel::Core (optional, toggle with '--install_taskcore'/'--noinstall_taskcore')
 END_OF_HELP
 
     exit;
