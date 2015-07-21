@@ -265,17 +265,15 @@ sub system_formatted {
 }
 
 sub random_pass {
-    my $password_length = 12;
-    my $password;
-    my $_rand;
-    my @chars = qw(a b c d e f g h j k l m n o p q r s t u v w x y z - _ % # ! 1 2 3 4 5 6 7 8 9 Z Y X W V U T S R Q P N M L K J H G F E D C B A $ & = +);
-    srand;
-    my $key = @chars;
-    for ( my $i = 1; $i <= $password_length; $i++ ) {
-        $_rand = int( rand $key );
-        $password .= $chars[$_rand];
+    my $length = shift || 12;
+
+    my $possible = 'abcdefghijkmnpqrstuvwxyz123456789';
+    my $string;
+    while ( length($string) < $length ) {
+        $string .= substr( $possible, ( int( rand( length($possible) ) ) ), 1 );
     }
-    return $password;
+
+    return $string;
 }
 
 sub usage {
