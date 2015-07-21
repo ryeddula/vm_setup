@@ -1,10 +1,16 @@
 #!/usr/bin/perl
+# vm_setup
+# Utility script to help setup VMs on cPanel VMs.
 
-# vm_setup.pl
+# Code must be perl v5.8.8 complaint
+# to ensure that it can be run on all supported distros.
+#
+# Do NOT use non-core modules.
 
 use strict;
 use warnings;
 
+use Data::Dumper;
 use Getopt::Long;
 use Fcntl;
 $| = 1;
@@ -12,38 +18,53 @@ $| = 1;
 my $VERSION = '0.3.2';
 
 # get opts
-my ( $ip, $natip, $help, $fast, $full, $force, $cltrue, $answer );
+my $opts = {
+    'run_upcp'                 => 0,
+    'run_check_cpanel_rpms'    => 0,
+    'install_task_cpanel_core' => 0,
+    'force'                    => 0,
+    'install_cloudlinux'       => 0,
+
+    # Optional configuration options' defaults:
+    'sub' => {
+        'hostname'      => 'daily.cpanel.vm',
+        'metadata_host' => $ENV{'EC2_METADATA_HOST'},
+    },
+};
+
 GetOptions(
-    "help"      => \&usage,
-    "full"      => \$full,
-    "fast"      => \$fast,
-    "force"     => \$force,
-    "installcl" => \$cltrue,
+    'help'             => \&usage,
+    'full'             => \&enable_everything,
+    'force'            => \$opts->{'force'},
+    'installcl'        => \$opts->{'install_cloudlinux'},
+    'upcp!'            => \$opts->{'run_upcp'},
+    'check_rpms!'      => \$opts->{'run_check_cpanel_rpms'},
+    'install_taskcore' => \$opts->{'install_task_cpanel_core'},
+
+    # Optional configuration options:
+    'hostname=s'      => \$opts->{'sub'}->{'hostname'},
+    'metadata_host=s' => \$opts->{'sub'}->{'metadata_host'},
 );
 
+# Globals
+my ( $ip, $natip );
+
 # print header
-print "\nVM Server Setup Script\n" . "Version: $VERSION\n" . "\n";
+print "\n[*] VM Server Setup Script\n";
+print "[*] Version: $VERSION\n\n";
 
 # generate random password
-my $rndpass = &random_pass();
+my $rndpass = random_pass();
 
 ### and go
 if ( -e "/root/vmsetup.lock" ) {
-    if ( !$force ) {
+    if ( !$opts->{'force'} ) {
         print "/root/vmsetup.lock exists. This script may have already been run. Use --force to bypass. Exiting...\n";
         exit;
     }
     else {
         print "/root/vmsetup.lock exists. --force passed. Ignoring...\n";
     }
-}
-if ($full) {
-    print "--full passed. Passing y to all optional setup options.\n\n";
-    chomp( $answer = "y" );
-}
-if ($fast) {
-    print "--fast passed. Skipping all optional setup options.\n\n";
-    chomp( $answer = "n" );
 }
 
 # create lock file
@@ -56,10 +77,10 @@ system_formatted("yum install mtr nmap telnet nc jq s3cmd bind-utils jwhois dev 
 
 # set hostname
 print "setting hostname\n";
-system_formatted("hostname daily.cpanel.vm");
+system_formatted("hostname $opts->{'sub'}->{'hostname'}");
 sysopen( my $etc_hostname, '/etc/hostname', O_WRONLY | O_CREAT )
   or die print_formatted("$!");
-print $etc_hostname "daily.cpanel.vm";
+print $etc_hostname "$opts->{'sub'}->{'hostname'}";
 close($etc_hostname);
 
 # set /etc/sysconfig/network
@@ -67,7 +88,7 @@ print "updating /etc/sysconfig/network\n";
 unlink '/etc/sysconfig/network';
 sysopen( my $etc_network, '/etc/sysconfig/network', O_WRONLY | O_CREAT )
   or die print_formatted("$!");
-print $etc_network "NETWORKING=yes\n" . "NOZEROCONF=yes\n" . "HOSTNAME=daily.cpanel.vm\n";
+print $etc_network "NETWORKING=yes\n" . "NOZEROCONF=yes\n" . "HOSTNAME=" . $opts->{'sub'}->{'hostname'} . "\n";
 close($etc_network);
 
 # add resolvers - WE SHOULD NOT BE USING GOOGLE DNS!!! (or any public resolvers)
@@ -84,7 +105,7 @@ system_formatted("/scripts/build_cpnat");
 chomp( $ip    = qx(cat /var/cpanel/cpnat | awk '{print\$2}') );
 chomp( $natip = qx(cat /var/cpanel/cpnat | awk '{print\$1}') );
 
-# create .whostmgrft
+# create .whostmgrft to skip initial setup wizard
 print "creating /etc/.whostmgrft\n";
 sysopen( my $etc_whostmgrft, '/etc/.whostmgrft', O_WRONLY | O_CREAT )
   or die print_formatted("$!");
@@ -100,7 +121,7 @@ if ( $OSVER =~ 7.1 ) {
 }
 sysopen( my $etc_wwwacct_conf, '/etc/wwwacct.conf', O_WRONLY | O_CREAT )
   or die print_formatted("$!");
-print $etc_wwwacct_conf "HOST daily.cpanel.vm\n"
+print $etc_wwwacct_conf "HOST $opts->{'sub'}->{'hostname'}\n"
   . "ADDR $natip\n"
   . "HOMEDIR /home\n"
   . "ETHDEV eth0\n"
@@ -124,7 +145,7 @@ print "correcting /etc/hosts\n";
 unlink '/etc/hosts';
 sysopen( my $etc_hosts, '/etc/hosts', O_WRONLY | O_CREAT )
   or die print_formatted("$!");
-print $etc_hosts "127.0.0.1		localhost localhost.localdomain localhost4 localhost4.localdomain4\n" . "::1		localhost localhost.localdomain localhost6 localhost6.localdomain6\n" . "$ip		daily daily.cpanel.vm\n";
+print $etc_hosts "127.0.0.1		localhost localhost.localdomain localhost4 localhost4.localdomain4\n" . "::1		localhost localhost.localdomain localhost6 localhost6.localdomain6\n" . "$ip		$opts->{'sub'}->{'hostname'}\n";
 close($etc_hosts);
 
 # fix screen perms
@@ -155,37 +176,23 @@ print "Updating tweak settings (cpanel.config)...\n";
 system_formatted("/usr/bin/replace allowremotedomains=0 allowremotedomains=1 allowunregistereddomains=0 allowunregistereddomains=1 -- /var/cpanel/cpanel.config");
 
 # upcp
-print "would you like to run upcp now? [n] \n";
-if ( !$full && !$fast ) {
-    chomp( $answer = <STDIN> );
-}
-if ( $answer eq "y" ) {
+if ( $opts->{'run_upcp'} ) {
     print "\nrunning upcp \n ";
     system_formatted('/scripts/upcp');
 }
 
-# running another check_cpanel_rpms
-print "would you like to run check_cpanel_rpms now? [n] \n";
-if ( !$full && !$fast ) {
-    chomp( $answer = <STDIN> );
-}
-if ( $answer eq "y" ) {
+if ( $opts->{'run_check_cpanel_rpms'} ) {
     print "\nrunning check_cpanel_rpms \n ";
     system_formatted('/scripts/check_cpanel_rpms --fix');
 }
 
-# install Task::Cpanel::Core
-print "would you like to install Task::Cpanel::Core? [n] \n";
-if ( !$full && !$fast ) {
-    chomp( $answer = <STDIN> );
-}
-if ( $answer eq "y" ) {
+if ( $opts->{'install_task_cpanel_core'} ) {
     print "\ninstalling Task::Cpanel::Core\n ";
     system_formatted('/scripts/perlinstaller Task::Cpanel::Core');
 }
 
 print "Installing root's crontab if missing...\n";
-if ( !( -e ("/var/spool/cron/root") ) or -s ("/var/spool/cron/root") ) {
+if ( !-s "/var/spool/cron/root" ) {
     sysopen( my $roots_cron, '/var/spool/cron/root', O_WRONLY | O_CREAT )
       or die print_formatted("$!");
     print $roots_cron "8,23,38,53 * * * * /usr/local/cpanel/whostmgr/bin/dnsqueue > /dev/null 2>&1
@@ -211,7 +218,7 @@ print "updating /etc/motd\n";
 unlink '/etc/motd';
 sysopen( my $etc_motd, '/etc/motd', O_WRONLY | O_CREAT )
   or die print_formatted("$!");
-print $etc_motd "\nVM Setup Script created the following test accounts:\n" . "https://IPADDR:2087/login/?user=root&pass=cpanel1\n" . "https://IPADDR:2083/login/?user=cptest&pass=" . $rndpass . "\n" . "https://IPADDR:2096/login/?user=testing\@cptest.tld&pass=" . $rndpass . "\n\n";
+print $etc_motd "\nVM Setup Script created the following test accounts:\n" . "https://$ip:2087/login/?user=root&pass=cpanel1\n" . "https://$ip:2083/login/?user=cptest&pass=" . $rndpass . "\n" . "https://$ip:2096/login/?user=testing\@cptest.tld&pass=" . $rndpass . "\n\n";
 close($etc_motd);
 
 # disables cphulkd
@@ -224,7 +231,7 @@ print "updating cpanel license\n";
 system_formatted('/usr/local/cpanel/cpkeyclt');
 
 # install CloudLinux
-if ($cltrue) {
+if ( $opts->{'install_cloudlinux'} ) {
 
     # Remove /var/cpanel/nocloudlinux touch file (if it exists)
     if ( -e ("/var/cpanel/nocloudlinux") ) {
@@ -238,7 +245,7 @@ if ($cltrue) {
 print "setup complete\n\n";
 system_formatted('cat /etc/motd');
 print "\n";
-if ($cltrue) {
+if ( $opts->{'install_cloudlinux'} ) {
     print "CloudLinux installed! A reboot is required!";
 }
 
@@ -262,16 +269,7 @@ sub random_pass {
     my $password_length = 12;
     my $password;
     my $_rand;
-    my @chars = split(
-        " ", "
-   		a b c d e f g h j k l m 
-   		n o p q r s t u v w x y z 
-   		- _ % # ! 1 2 3 4 5 6 7 
-   		8 9 Z Y X W V U T S R Q P 
-   		N M L K J H G F E D C 
-   		B A $ & = + 
-	"
-    );
+    my @chars = qw(a b c d e f g h j k l m n o p q r s t u v w x y z - _ % # ! 1 2 3 4 5 6 7 8 9 Z Y X W V U T S R Q P N M L K J H G F E D C B A $ & = +);
     srand;
     my $key = @chars;
     for ( my $i = 1; $i <= $password_length; $i++ ) {
@@ -318,3 +316,10 @@ END_OF_HELP
     exit;
 }
 
+sub enable_everything {
+    foreach my $key ( keys %{$opts} ) {
+        next if $key =~ m/^(install_cloudlinux|force)$/;
+        $opts->{$key} = 1;
+    }
+    return 1;
+}
