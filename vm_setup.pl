@@ -72,7 +72,7 @@ system_formatted("touch /root/vmsetup.lock");
 
 # check for and install prereqs
 print "installing utilities via yum [mtr nmap telnet nc jq s3cmd bind-utils jwhois dev git]\n";
-system_formatted("yum install mtr nmap telnet nc jq s3cmd bind-utils jwhois dev git -y");
+system_formatted("yum -y install vim-enhanced mtr nmap telnet nc jq s3cmd bind-utils jwhois dev git");
 
 # set hostname
 print "setting hostname\n";
